@@ -9,10 +9,10 @@ name: Docker Hub image
 #     pkg-vsn.sh's git-describe suffix
 #
 # Required repo secrets:
-#   DOCKER_HUB_USER   docker hub account name
+#   DOCKER_HUB_USER   docker hub account name (personal namespace)
 #   DOCKER_HUB_TOKEN  docker hub personal access token (read/write)
-# Optional repo variable:
-#   DOCKER_ORG        docker hub namespace (default: supmq)
+# The image is pushed to docker.io/${DOCKER_HUB_USER}/supmq:<image_tag>
+# (personal account, repository name "supmq").
 #
 # NOTE: linux/arm64 native runners are free for PUBLIC repos only.
 
@@ -76,7 +76,6 @@ jobs:
     env:
       PROFILE: emqx
       DOCKER_REGISTRY: docker.io
-      DOCKER_ORG: ${{ vars.DOCKER_ORG || 'supmq' }}
       PKG_VSN: ${{ needs.build.outputs.PKG_VSN }}
       EMQX_SOURCE_TYPE: tgz
 
@@ -110,7 +109,10 @@ jobs:
           DOCKER_PUSH: true
           DOCKER_LOAD: false
           DOCKER_PLATFORMS: linux/amd64,linux/arm64
-          EMQX_IMAGE_TAG: "emqx:${{ inputs.image_tag }}"
+          # Full image path: docker.io/<DOCKER_HUB_USER>/supmq:<tag>
+          # (personal namespace + repo name "supmq"; EMQX_IMAGE_TAG carries
+          #  the whole <org>/<repo>:<tag> part, overriding DOCKER_ORG)
+          EMQX_IMAGE_TAG: "${{ secrets.DOCKER_HUB_USER }}/supmq:${{ inputs.image_tag }}"
         run: |
           ./build ${PROFILE} docker
           echo "## Image pushed" >> "$GITHUB_STEP_SUMMARY"
