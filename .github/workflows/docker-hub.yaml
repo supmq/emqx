@@ -98,8 +98,12 @@ jobs:
 
       - name: Move artifacts to root directory
         run: |
-          ls -lR _packages/emqx
-          mv _packages/emqx/*.tar.gz ./
+          # download-artifact merge-multiple:true flattens files into
+          # _packages/ directly (no per-artifact subdir); use find so the
+          # move works for either layout
+          ls -lR _packages
+          find _packages -name 'emqx-*.tar.gz' -exec mv {} . \;
+          ls -l emqx-*.tar.gz
 
       - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
