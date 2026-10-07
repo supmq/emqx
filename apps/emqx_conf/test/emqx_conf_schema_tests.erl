@@ -691,19 +691,12 @@ invalid_role_test() ->
         hocon_tconf:check_plain(emqx_conf_schema, Conf, #{required => false}, [node])
     ).
 
-unsupported_role_test() ->
-    test_unsupported_role(emqx_release:edition()).
-
-test_unsupported_role(ee) ->
-    %% all roles are supported in ee
-    ok;
-test_unsupported_role(ce) ->
-    %% replicant role is not allowed for ce since 5.8.0
+%% LibreMQ enables the replicant role in all editions; upstream EMQX restricted it
+%% to Enterprise from 5.8.0 on. See emqx_conf_mria_schema.
+replicant_role_is_supported_test() ->
     Conf = node_role_conf(replicant),
-    ?assertThrow(
-        {emqx_conf_schema, [
-            #{reason := "Node role 'replicant' is only allowed in Enterprise edition since 5.8.0"}
-        ]},
+    ?assertMatch(
+        Value when is_map(Value),
         hocon_tconf:check_plain(emqx_conf_schema, Conf, #{required => false}, [node])
     ).
 

@@ -32,7 +32,7 @@ schemas(Edition) ->
         customized(Edition).
 
 mria(ce) ->
-    [];
+    [emqx_conf_mria_schema];
 mria(ee) ->
     [emqx_enterprise_schema].
 
