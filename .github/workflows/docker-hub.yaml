@@ -1,0 +1,119 @@
+name: Docker Hub image
+
+# Lean variant of build_and_push_docker_images.yaml for the supmq fork:
+#   - native runners per arch (amd64 / arm64), tgz built natively, no
+#     cross-compilation inside Docker
+#   - publishes a single multi-arch manifest to docker.io only
+#     (no public.ecr.aws, no elixir profile, no S3 upload)
+#   - image tag is an explicit input (defaults to 5.8.10) instead of
+#     pkg-vsn.sh's git-describe suffix
+#
+# Required repo secrets:
+#   DOCKER_HUB_USER   docker hub account name
+#   DOCKER_HUB_TOKEN  docker hub personal access token (read/write)
+# Optional repo variable:
+#   DOCKER_ORG        docker hub namespace (default: supmq)
+#
+# NOTE: linux/arm64 native runners are free for PUBLIC repos only.
+
+concurrency:
+  group: dockerhub-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        required: false
+        description: 'branch or tag to build (default: the branch the workflow runs on)'
+      image_tag:
+        required: false
+        default: '5.8.10'
+        description: 'image tag, e.g. 5.8.10'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
+    outputs:
+      PKG_VSN: ${{ steps.build.outputs.PKG_VSN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref }}
+      - name: build release tarball
+        id: build
+        env:
+          BUILDER_SYSTEM: force_docker
+        run: |
+          source ./env.sh
+          ./scripts/buildx.sh --profile emqx --pkgtype tgz --builder "$EMQX_DOCKER_BUILD_FROM"
+          PKG_VSN=$(docker run --rm -v $(pwd):$(pwd) -w $(pwd) -u $(id -u) "$EMQX_DOCKER_BUILD_FROM" ./pkg-vsn.sh emqx)
+          echo "PKG_VSN=$PKG_VSN" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: "emqx-${{ matrix.arch }}.tar.gz"
+          path: "_packages/emqx/emqx-*.tar.gz"
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: error
+
+  docker:
+    runs-on: ubuntu-22.04
+    needs:
+      - build
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROFILE: emqx
+      DOCKER_REGISTRY: docker.io
+      DOCKER_ORG: ${{ vars.DOCKER_ORG || 'supmq' }}
+      PKG_VSN: ${{ needs.build.outputs.PKG_VSN }}
+      EMQX_SOURCE_TYPE: tgz
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: "emqx-*.tar.gz"
+          path: _packages
+          merge-multiple: true
+
+      - name: Move artifacts to root directory
+        run: |
+          ls -lR _packages/emqx
+          mv _packages/emqx/*.tar.gz ./
+
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+
+      - name: Login to hub.docker.com
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          username: ${{ secrets.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        env:
+          DOCKER_PUSH: true
+          DOCKER_LOAD: false
+          DOCKER_PLATFORMS: linux/amd64,linux/arm64
+          EMQX_IMAGE_TAG: "emqx:${{ inputs.image_tag }}"
+        run: |
+          ./build ${PROFILE} docker
+          echo "## Image pushed" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat .emqx_docker_image_tags >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
